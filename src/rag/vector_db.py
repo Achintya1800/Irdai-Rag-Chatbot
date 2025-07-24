@@ -52,57 +52,76 @@ class VectorDatabase:
         embeddings = self.embedding_model.encode(texts, convert_to_tensor=False)
         return embeddings.tolist()
         
-    def add_documents(self, chunks: List[Any]) -> None:
-        """Add document chunks to vector database"""
-        logger.info(f"Adding {len(chunks)} chunks to vector database")
-        
-        if not chunks:
-            logger.warning("No chunks to add")
-            return
-            
-        # Prepare data for ChromaDB
-        ids = []
-        documents = []
-        metadatas = []
-        
-        for chunk in chunks:
-            ids.append(chunk.chunk_id)
-            documents.append(chunk.content)
-            
-            # Prepare metadata (ChromaDB requires string values)
-            metadata = {}
-            for key, value in chunk.metadata.items():
-                if isinstance(value, (str, int, float, bool)):
-                    metadata[key] = str(value)
-                elif isinstance(value, list):
-                    metadata[key] = json.dumps(value)
-                else:
-                    metadata[key] = str(value)
-                    
-            metadatas.append(metadata)
-            
-        # Generate embeddings
-        embeddings = self.generate_embeddings(documents)
-        
-        # Add to collection
+    def add_documents(self, documents: List[Any]) -> bool:
+        """
+        ENHANCED: Add documents with better logging and error handling
+        """
         try:
-            self.collection.add(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=metadatas
-            )
-            logger.info(f"Successfully added {len(chunks)} chunks to vector database")
-        except Exception as e:
-            logger.error(f"Error adding documents to vector database: {e}")
-            raise
+            logger.info(f"📥 Adding {len(documents)} documents to vector database")
             
+            if not documents:
+                logger.warning("No documents to add")
+                return False
+                
+            # Prepare data for ChromaDB
+            ids = []
+            docs = []
+            metadatas = []
+            
+            # ENHANCED: Log document details
+            for i, doc in enumerate(documents[:3]):  # Log first 3
+                title = getattr(doc, 'title', 'No title')
+                doc_id = getattr(doc, 'metadata', {}).get('document_id', 'N/A')
+                logger.info(f"  {i+1}. Adding: '{title[:60]}...' (ID: {doc_id})")
+            
+            if len(documents) > 3:
+                logger.info(f"  ... and {len(documents) - 3} more documents")
+            
+            for doc in documents:
+                ids.append(doc.chunk_id)
+                docs.append(doc.content)
+                
+                # Prepare metadata (ChromaDB requires string values)
+                metadata = {}
+                for key, value in doc.metadata.items():
+                    if isinstance(value, (str, int, float, bool)):
+                        metadata[key] = str(value)
+                    elif isinstance(value, list):
+                        metadata[key] = json.dumps(value)
+                    else:
+                        metadata[key] = str(value)
+                        
+                metadatas.append(metadata)
+                
+            # Generate embeddings
+            embeddings = self.generate_embeddings(docs)
+            
+            # Add to collection
+            try:
+                self.collection.add(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=docs,
+                    metadatas=metadatas
+                )
+                logger.info(f"✅ Successfully added {len(documents)} documents to vector database")
+                return True
+            except Exception as e:
+                logger.error(f"❌ Error adding documents to vector database: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error adding documents to vector database: {e}")
+            return False
+    
     def search_similar(self, query: str, top_k: int = None) -> List[Dict[str, Any]]:
-        """Search for similar documents"""
+        """
+        ENHANCED: Search with better logging
+        """
         if top_k is None:
             top_k = self.config.TOP_K_RESULTS
             
-        logger.info(f"Searching for similar documents: {query[:100]}...")
+        logger.info(f"🔍 Querying vector database: '{query}' (top {top_k})")
         
         # Generate query embedding
         query_embedding = self.generate_embeddings([query])[0]
@@ -143,10 +162,17 @@ class VectorDatabase:
                     pass
                     
             formatted_results.append(result)
-            
-        logger.info(f"Found {len(formatted_results)} similar documents")
-        return formatted_results
         
+        logger.info(f"✅ Found {len(formatted_results)} results from vector database")
+        
+        # Log top results for debugging
+        for i, result in enumerate(formatted_results[:3]):
+            title = result['metadata'].get('title', 'No title')
+            score = result.get('similarity_score', 0)
+            logger.info(f"  {i+1}. '{title[:60]}...' (Score: {score:.3f})")
+            
+        return formatted_results
+
     def search_with_filters(self, query: str, filters: Dict[str, Any] = None, 
                            top_k: int = None) -> List[Dict[str, Any]]:
         """Search with metadata filters"""
